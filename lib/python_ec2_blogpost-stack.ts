@@ -8,17 +8,17 @@ import { Vpc, SubnetType, Peer, Port, AmazonLinuxGeneration,
 } from 'aws-cdk-lib/aws-ec2';
 
 import { Role, ServicePrincipal, ManagedPolicy } from 'aws-cdk-lib/aws-iam';
-import { Repository } from 'aws-cdk-lib/aws-codecommit';
 import { Pipeline, Artifact } from 'aws-cdk-lib/aws-codepipeline';
-import { CodeCommitSourceAction, CodeBuildAction, CodeDeployServerDeployAction } from 'aws-cdk-lib/aws-codepipeline-actions';
+import { GitHubSourceAction, CodeBuildAction, CodeDeployServerDeployAction } from 'aws-cdk-lib/aws-codepipeline-actions';
 import { PipelineProject, LinuxBuildImage } from 'aws-cdk-lib/aws-codebuild';
 import { ServerDeploymentGroup, ServerApplication, InstanceTagSet } from 'aws-cdk-lib/aws-codedeploy';
+import { SecretValue } from 'aws-cdk-lib';
 
 export class PythonEc2BlogpostStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
-
     // IAM
+    // Policy for CodeDeploy bucket access
     // Role that will be attached to the EC2 instance so it can be 
     // managed by AWS SSM
     const webServerRole = new Role(this, "ec2Role", {
@@ -91,11 +91,6 @@ export class PythonEc2BlogpostStack extends cdk.Stack {
     cdk.Tags.of(webServer).add('STAGE','PROD')
     
     // Pipeline stuff
-    // CodeCommit - This is where I store code
-    const codeRepo = new Repository(this, 'code_repo',{
-      repositoryName: 'python_app',
-      description: 'This is the repository for the SampleApp python application.'
-    });
     // CodePipeline
     const pipeline = new Pipeline(this, 'python_web_pipeline',{
       pipelineName: 'PythonWebApp',
@@ -118,13 +113,17 @@ export class PythonEc2BlogpostStack extends cdk.Stack {
     // Add some action
     // Source action
     const sourceOutput = new Artifact();
-    const sourceAction = new CodeCommitSourceAction({
+    // This thing ^ does not know the bucket name during compilation
+    const githubSourceAction = new GitHubSourceAction({
+      actionName: 'GithubSource',
+      oauthToken: SecretValue.secretsManager('github-oauth-token'), // SET UP BEFORE
+      owner: 'darko-mesaros', // THIS NEEDS TO BE CHANGED TO THE READER
+      repo: 'sample-python-web-app',
       branch: 'main',
-      actionName: 'CodeCommit',
-      repository: codeRepo,
-      output: sourceOutput
-    });
-    sourceStage.addAction(sourceAction);
+      output: sourceOutput,
+    })
+
+    sourceStage.addAction(githubSourceAction);
     // Build Action
     const pythonTestProject = new PipelineProject(this, 'pythonTestProject',{
       environment: {
